@@ -256,11 +256,8 @@ def timeit(logger):
                 'Complete time: {0}\nEclipsed time: {1}'.format(time.strftime('%H:%M:%S', time.localtime(end_time)),
                                                                 time.strftime('%H:%M:%S', use)))
             return res
-
         return wrapper
-
     return decorator
-
 
 def parse_arg():
     parser = argparse.ArgumentParser(description='Clean GWAS data.')
@@ -416,36 +413,6 @@ def split_dup(df, opts, cnames):
     df = df.append(drop_dup_df, ignore_index=True, sort=False).drop_duplicates(keep=False)
     return df, drop_dup_df
 
-
-'''
-def split_dup(opts, cnames)->tuple:
-    usednames = opts.identifier.split(":")
-    df = pd.read_csv(opts.infp, names=cnames, sep=opts.sep, header=0)
-    if 'RS' in usednames: df['RS'] = df['RS'].str.upper()
-    if 'A1' in usednames: df['A1'] = df['A1'].str.upper()
-    if 'A2' in usednames: df['A2'] = df['A2'].str.upper()
-    if 'CHR' in usednames: df['CHR'] = df['CHR'].str.upper()
-    if 'POS' in usednames: df['POS'] = df['POS'].str.upper()
-    id_prefix = opts.identifier.replace('A1:A2', '').strip(':').split(":")
-    dup_df = df.loc[df.duplicated(subset=id_prefix, keep=False)].copy()
-
-    idpool1 = dup_df.apply(lambda x: ':'.join([x[e] for e in usednames]).upper(), axis=1)
-    print(idpool1)
-    if 'A1:A2' in opts.identifier:
-        cnames2 = opts.identifier.replace('1', '3').replace('2', '1').replace('3', '2').split(':')
-        df = df.loc[:, cnames2].copy()
-        idpool2 = df.apply(lambda x: ':'.join([e for e in x]).upper(), axis=1)
-        idpool3 = idpool1.apply(
-            lambda x: x.replace('A', 'Z').replace('T', 'A').replace('Z', 'T').replace('C', 'Z').replace('G','C').replace('Z', 'G'))
-        idpool4 = idpool2.apply(
-            lambda x: x.replace('A', 'Z').replace('T', 'A').replace('Z', 'T').replace('C', 'Z').replace('G','C').replace('Z', 'G'))
-        idpool1 = pd.concat([idpool1, idpool2, idpool3, idpool4], ignore_index=True, sort=False)
-    drop_dup_df, remain_dup_df = split_df(dup_df, dup_df.apply(is_dup, axis=1, idpool=idpool1, identifier=opts.identifier))
-    df = df.append(remain_dup_df, ignore_index=True, sort=False)
-    return df, drop_dup_df
-'''
-
-
 def qc(opts, cnames: list, logger=logger) -> pd.DataFrame:
     total_df = pd.DataFrame()
     for chunk in pd.read_csv(opts.infp, sep=opts.sep, header=0, names=cnames, iterator=True, chunksize=2000000
@@ -511,11 +478,19 @@ def qc(opts, cnames: list, logger=logger) -> pd.DataFrame:
     return total_df
 
 
-def resort_col(df: pd.DataFrame) -> pd.DataFrame:
+def resort_col(df: pd.DataFrame, logger) -> pd.DataFrame:
     '''
     将一个dataframe重新排序。'RS', 'A1', 'A2', 'FREQ', 'BETA', 'SE', 'P', 'N'在前，其他在后。
     '''
-    std_cols = ['RS', 'A1', 'A2', 'FREQ', 'BETA', 'SE', 'P', 'N', 'OR']
+    std_cols = ['RS', 'A1', 'A2', 'FREQ', 'SE', 'P', 'N']
+    if 'BETA' in df.columns and not 'OR' in df.columns:
+        std_cols.insert(3,'BETA')
+    elif not 'BETA' in df.columns and 'OR' in df.columns:
+        std_cols.insert(3, 'OR')
+    else:
+        std_cols.insert(3, 'BETA')
+        logger.logger.info('\033[5;31mWarning: BETA and OR statistics are both found in your file, '
+                           'BETA is used as preferred statistic corresponding to SE statistic\033[0m')
     act_cols = [e for e in std_cols if e in df.columns]
     add_cols = [e for e in df.columns if not e in std_cols]
     act_cols.extend(add_cols)
@@ -527,7 +502,8 @@ def get_identifier_pool(opts, headercols, logger):
     usednames = opts.identifier.split(':')
     if set(usednames) - set(headercols):
         logger.logger.warning(
-            '\033[5;31mWarning: --indentifier use columns unidentified in your file:{0}, Please check it.\nExit...  \033[0m'.format(
+            '\033[5;31mWarning: --indentifier use columns unidentified in your file:{0}, '
+            'Please check it.\nExit...  \033[0m'.format(
                 set(usednames) - set(headercols)))
         sys.exit(1)
     df = pd.read_csv(opts.infp, names=headercols, usecols=usednames, sep=opts.sep, header=0)
@@ -576,7 +552,7 @@ def init(opts):
     header = read_header(opts.infp)
     cnames = parse_header(header, opts, logger, default_cnames)
     df = qc(opts, cnames, logger)
-    df = resort_col(df)
+    df = resort_col(df, logger)
     df = truncate(opts, df)
     write_file(df, opts, cnames)
 
