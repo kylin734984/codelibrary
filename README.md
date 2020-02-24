@@ -1,4 +1,7 @@
-[TOC]
+- [Clean GWAS](#clean-gwas)
+
+<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
 
 The scripts depends on the [Anaconda](https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/Anaconda3-2019.10-Linux-x86_64.sh) development environment:
 
