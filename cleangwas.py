@@ -385,8 +385,11 @@ def is_dup(a_row, idpool, identifier):
     return True if idpool.isin([id_]).to_list().count(True) > 1 else False
 
 def get_converter(cnames):
+    '''
+    CHR 因为可能有XY染色体，所以当做str类型
+    '''
     converter = {}
-    dec_cols = ['FREQ','BETA', 'SE','P', 'N', 'OR', 'Z']
+    dec_cols = ['FREQ','BETA', 'SE','P', 'N', 'OR', 'Z', 'POS']
     for x in cnames:
         converter[x] = Decimal if x in dec_cols else str
     return converter
@@ -548,10 +551,12 @@ def write_file(df, opts, cnames):
     if 'P' in cnames:
         df['P'] = df['P'].round(1000)
     '''
+    '''
     for x in df.columns:
         df[x] = df[x].astype(str)
     if 'N' in cnames:
         df['N'] = df['N'].astype('object')
+    '''
     df.to_csv(opts.outfp, sep='\t', na_rep='NA', float_format='%g', encoding='utf-8', index=False)
 
 
