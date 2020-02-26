@@ -1,11 +1,13 @@
 import pandas as pd
 import sys
-from decimal import Decimal
+from decimal import Decimal,getcontext
 import time
 import argparse
 from functools import wraps
 import logging
 import os
+import numpy as np
+
 
 '''
 Summary:
@@ -36,7 +38,7 @@ Details:
 
 '''
 
-
+getcontext().prec = 1000
 class options():
     def __init__(self):
         self.infp = 'HDL'
@@ -66,8 +68,7 @@ class options():
         self.N_name = None
 
 
-pd.set_option('precision', 800)
-# pd.set_option('mode.chained_assignment', None)
+pd.set_option('precision', 5)
 bad_snps = {
     'P0': pd.DataFrame(),  # SNPs with p<0 or p=1
     'INFO0': pd.DataFrame(),  # imputaion <0 or >1
@@ -139,6 +140,13 @@ default_cnames = {
     'RSID': 'RS',
     'RS_NUMBER': 'RS',
     'RS_NUMBERS': 'RS',
+    #CHR
+    'CHR':'CHR',
+    'CHROMOSOME':'CHR',
+    #POS
+    'POS':'POS',
+    'BP':'POS',
+    'POSITION':'POS',
     # NUMBER OF STUDIES
     'NSTUDY': 'NSTUDY',
     'N_STUDY': 'NSTUDY',
@@ -186,6 +194,9 @@ default_cnames = {
     'Z-SCORE': 'Z',
     'GC_ZSCORE': 'Z',
     'Z': 'Z',
+    'Z_VALUE':'Z',
+    'ZVALUE':'Z',
+    'ZVAL':'Z',
     'OR': 'OR',
     'B': 'BETA',
     'BETA': 'BETA',
@@ -196,11 +207,10 @@ default_cnames = {
     # INFO
     'INFO': 'INFO',
     # MAF
-    'EAF': 'FRQ',
-    'FRQ': 'FRQ',
-    'MAF': 'FRQ',
-    'FRQ_U': 'FRQ',
-    'F_U': 'FRQ',
+    'EAF': 'FREQ',
+    'FRQ': 'FREQ',
+    'MAF': 'FREQ',
+    'FRQ_U': 'FREQ',
     'FREQ': 'FREQ',
     'FREQ1': 'FREQ',
     # se
@@ -241,7 +251,6 @@ class Logger():
 
 logger = Logger()
 
-
 def timeit(logger):
     def decorator(fun):
         @wraps(fun)  # 为了保留被装饰函数的函数名和帮助文档信息
@@ -256,11 +265,8 @@ def timeit(logger):
                 'Complete time: {0}\nEclipsed time: {1}'.format(time.strftime('%H:%M:%S', time.localtime(end_time)),
                                                                 time.strftime('%H:%M:%S', use)))
             return res
-
         return wrapper
-
     return decorator
-
 
 def parse_arg():
     parser = argparse.ArgumentParser(description='Clean GWAS data.')
@@ -334,7 +340,7 @@ def parse_header(header: str, opts, logger, default_cnames=default_cnames) -> li
             new_he_sep.append(e)
             notes += 'unidentified: {0}{1}Unknown\n'.format(e, ' ' * (20 - len(e)))
     logger.logger.info(notes)
-    logger.logger.info('\033[5;31mWarning:\033[0m If you use some unidentified columns, you will get an error!')
+    logger.logger.info('Tips: If you use some unidentified columns, you will get an error!')
     return new_he_sep
 
 
@@ -346,27 +352,25 @@ def split_df(df: pd.DataFrame, flag: pd.Series) -> tuple:
 
 
 def fliter_p(a_row: pd.Series, p_thresh=1) -> bool:
-    return 0 <= a_row['P'] <= p_thresh
+    return False if Decimal.is_nan(a_row['P']) else 0 <= Decimal(a_row['P']) <= p_thresh
 
 
 def fliter_info(a_row: pd.Series, info_thresh=0) -> bool:
-    return (0 < a_row['INFO'] <= 1) and (info_thresh <= a_row['INFO'] <= 1)
+    return False if Decimal.is_nan(a_row['INFO']) else (0 < Decimal(a_row['INFO']) <= 1) and (
+            info_thresh <= Decimal(a_row['INFO']) <= 1)
 
 
-def fliter_freq(a_row: pd.Series, maf_thresh=0.0) -> bool:
-    return maf_thresh <= a_row['FREQ'] <= 1 - maf_thresh
-
+def fliter_freq(a_row: pd.Series, maf_thresh=0) -> bool:
+    return False if Decimal.is_nan(a_row['FREQ']) else maf_thresh <= Decimal(a_row['FREQ']) <= 1 - maf_thresh
 
 def fliter_se(a_row: pd.Series) -> bool:
-    return a_row['SE'] > 0
-
+    return False if Decimal.is_nan(a_row['SE']) else Decimal(a_row['SE']) > 0
 
 def fliter_or(a_row: pd.Series) -> bool:
-    return a_row['OR'] > 0
-
+    return False if Decimal.is_nan(a_row['OR']) else Decimal(a_row['OR']) > 0
 
 def fliter_n(a_row: pd.Series, N=0) -> bool:
-    return a_row['N'] > N
+    return False if Decimal.is_nan(a_row['N']) else Decimal(a_row['N']) > N
 
 
 def rmindel(a_row: pd.Series) -> bool:
@@ -374,17 +378,18 @@ def rmindel(a_row: pd.Series) -> bool:
 
 
 def is_palindromic(arow):
-    if (arow['A1'] + ':' + arow['A2']).upper() in ['A:T', 'T:A', 'C:G', 'G:C']:
-        return True
-    else:
-        return False
-
+    return (arow['A1'] + ':' + arow['A2']).upper() in ['A:T', 'T:A', 'C:G', 'G:C']
 
 def is_dup(a_row, idpool, identifier):
-    id_ele = identifier.strip().split(":")
-    id_ = ':'.join([a_row[x] for x in id_ele])
+    id_ = ':'.join([a_row[x] for x in identifier.strip().split(":")])
     return True if idpool.isin([id_]).to_list().count(True) > 1 else False
 
+def get_converter(cnames):
+    converter = {}
+    dec_cols = ['FREQ','BETA', 'SE','P', 'N', 'OR', 'Z']
+    for x in cnames:
+        converter[x] = Decimal if x in dec_cols else str
+    return converter
 
 def split_dup(df, opts, cnames):
     usednames = opts.identifier.split(':')
@@ -416,40 +421,13 @@ def split_dup(df, opts, cnames):
     df = df.append(drop_dup_df, ignore_index=True, sort=False).drop_duplicates(keep=False)
     return df, drop_dup_df
 
-
-'''
-def split_dup(opts, cnames)->tuple:
-    usednames = opts.identifier.split(":")
-    df = pd.read_csv(opts.infp, names=cnames, sep=opts.sep, header=0)
-    if 'RS' in usednames: df['RS'] = df['RS'].str.upper()
-    if 'A1' in usednames: df['A1'] = df['A1'].str.upper()
-    if 'A2' in usednames: df['A2'] = df['A2'].str.upper()
-    if 'CHR' in usednames: df['CHR'] = df['CHR'].str.upper()
-    if 'POS' in usednames: df['POS'] = df['POS'].str.upper()
-    id_prefix = opts.identifier.replace('A1:A2', '').strip(':').split(":")
-    dup_df = df.loc[df.duplicated(subset=id_prefix, keep=False)].copy()
-
-    idpool1 = dup_df.apply(lambda x: ':'.join([x[e] for e in usednames]).upper(), axis=1)
-    print(idpool1)
-    if 'A1:A2' in opts.identifier:
-        cnames2 = opts.identifier.replace('1', '3').replace('2', '1').replace('3', '2').split(':')
-        df = df.loc[:, cnames2].copy()
-        idpool2 = df.apply(lambda x: ':'.join([e for e in x]).upper(), axis=1)
-        idpool3 = idpool1.apply(
-            lambda x: x.replace('A', 'Z').replace('T', 'A').replace('Z', 'T').replace('C', 'Z').replace('G','C').replace('Z', 'G'))
-        idpool4 = idpool2.apply(
-            lambda x: x.replace('A', 'Z').replace('T', 'A').replace('Z', 'T').replace('C', 'Z').replace('G','C').replace('Z', 'G'))
-        idpool1 = pd.concat([idpool1, idpool2, idpool3, idpool4], ignore_index=True, sort=False)
-    drop_dup_df, remain_dup_df = split_df(dup_df, dup_df.apply(is_dup, axis=1, idpool=idpool1, identifier=opts.identifier))
-    df = df.append(remain_dup_df, ignore_index=True, sort=False)
-    return df, drop_dup_df
-'''
-
-
 def qc(opts, cnames: list, logger=logger) -> pd.DataFrame:
     total_df = pd.DataFrame()
-    for chunk in pd.read_csv(opts.infp, sep=opts.sep, header=0, names=cnames, iterator=True, chunksize=2000000
-            , converters={'P': Decimal}):
+    converter = get_converter(cnames)
+    for chunk in pd.read_csv(opts.infp, sep=opts.sep, header=0, names=cnames, dtype=str,  iterator=True, chunksize=2000000):
+        '''不在read_csv()使用converters参数是因为当文件最后一列是空值时，会报decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>]。
+        另外同时用names和converters选项会报警告。'''
+        for k,v in converter.items(): chunk[k] = chunk[k].apply(v)
         try:
             if 'P' in chunk.columns:
                 chunk, dropdf = split_df(chunk, chunk.apply(fliter_p, axis=1, p_thresh=opts.pThresh))
@@ -468,7 +446,7 @@ def qc(opts, cnames: list, logger=logger) -> pd.DataFrame:
                     logger.logger.warning(
                         '\033[5;31mWarning: Allele columns are not found in your file, can\'t remove indel SNP  \033[0m')
             if 'FREQ' in chunk.columns:
-                chunk, dropdf = split_df(chunk, chunk.apply(fliter_freq, axis=1, maf_thresh=opts.maf))
+                chunk, dropdf = split_df(chunk, chunk.apply(fliter_freq, axis=1, maf_thresh=Decimal.from_float(opts.maf)))
                 # drop_snps['FREQ0'] = drop_snps['FREQ0'].append(dropdf)
                 del_no['FREQ0'] += dropdf.shape[0]
             if 'OR' in chunk.columns:
@@ -566,14 +544,20 @@ def truncate(opts, df: pd.DataFrame) -> pd.DataFrame:
 
 
 def write_file(df, opts, cnames):
+    '''
     if 'P' in cnames:
-        df['P'] = df['P'].astype('object')
-    df.to_csv(opts.outfp, sep='\t', na_rep='NA', float_format='%1.4e', encoding='utf-8', index=False)
+        df['P'] = df['P'].round(1000)
+    '''
+    for x in df.columns:
+        df[x] = df[x].astype(str)
+    if 'N' in cnames:
+        df['N'] = df['N'].astype('object')
+    df.to_csv(opts.outfp, sep='\t', na_rep='NA', float_format='%g', encoding='utf-8', index=False)
 
 
 @timeit(logger)
 def init(opts):
-    header = read_header(opts.infp)
+    header = read_header(opts.infp, opts.sep)
     cnames = parse_header(header, opts, logger, default_cnames)
     df = qc(opts, cnames, logger)
     df = resort_col(df)
